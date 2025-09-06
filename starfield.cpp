@@ -1,162 +1,101 @@
-// starfield.cpp
-// Compile: g++ -std=c++17 starfield.cpp -O2 -lSDL2 -o starfield
-
 #include <SDL2/SDL.h>
 #include <vector>
-#include <random>
+#include <cstdlib>
+#include <ctime>
 #include <cmath>
-#include <chrono>
-#include <iostream>
 
 struct Star {
-    float x, y, z; // 3D coordinates, z = depth
+    float x, y, z;
 };
 
-template <typename T>
-T clamp(T value, T low, T high) {
-    return (value < low) ? low : (value > high ? high : value);
-}
+int main() {
+    const int WIDTH = 1920;
+    const int HEIGHT = 1080;
+    const int NUM_STARS = 1000000;
+    const float NEAR_Z = 0.1f;
+    const float FAR_Z = 100.0f;
+    const float FORWARD_SPEED = 20.0f;
+    const float ROTATION_SPEED = 0.5f; // radians per second
+    const float FOV = 90.0f;
 
-int main(int argc, char** argv) {
-    const int WIDTH = 1280;
-    const int HEIGHT = 720;
-    const int N_STARS = 1000;
-    const float FOV = 300.0f;       // camera field-of-view scale
-    const float SPEED = 60.0f;      // units per second for forward movement (optional)
-    const float ROT_SPEED = 0.6f;   // radians per second rotation speed
+    SDL_Init(SDL_INIT_VIDEO);
+    SDL_Window* window = SDL_CreateWindow("SDL2 Rotating Starfield",
+                                          SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
+                                          WIDTH, HEIGHT, 0);
+    SDL_Renderer* renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
 
-    if (SDL_Init(SDL_INIT_VIDEO) != 0) {
-        std::cerr << "SDL_Init error: " << SDL_GetError() << "\n";
-        return 1;
+    std::srand(static_cast<unsigned>(std::time(nullptr)));
+
+    std::vector<Star> stars(NUM_STARS);
+    for (auto &s : stars) {
+        s.x = (std::rand() / (float)RAND_MAX - 0.5f) * 2.0f * WIDTH;
+        s.y = (std::rand() / (float)RAND_MAX - 0.5f) * 2.0f * HEIGHT;
+        s.z = NEAR_Z + (std::rand() / (float)RAND_MAX) * (FAR_Z - NEAR_Z);
     }
 
-    SDL_Window* win = SDL_CreateWindow("Rotating Starfield",
-                                       SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-                                       WIDTH, HEIGHT, SDL_WINDOW_SHOWN);
-    if (!win) {
-        std::cerr << "SDL_CreateWindow error: " << SDL_GetError() << "\n";
-        SDL_Quit();
-        return 1;
-    }
-
-    SDL_Renderer* ren = SDL_CreateRenderer(win, -1,
-        SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
-    if (!ren) {
-        std::cerr << "SDL_CreateRenderer error: " << SDL_GetError() << "\n";
-        SDL_DestroyWindow(win);
-        SDL_Quit();
-        return 1;
-    }
-
-    // random generator for star initial positions
-    std::mt19937 rng((unsigned)std::chrono::high_resolution_clock::now().time_since_epoch().count());
-    std::uniform_real_distribution<float> distX(-WIDTH, WIDTH);
-    std::uniform_real_distribution<float> distY(-HEIGHT, HEIGHT);
-    std::uniform_real_distribution<float> distZ(1.0f, FOV * 4.0f);
-
-    // initialize stars
-    std::vector<Star> stars;
-    stars.reserve(N_STARS);
-    for (int i = 0; i < N_STARS; ++i) {
-        stars.push_back({ distX(rng)*0.5f, distY(rng)*0.5f, distZ(rng) });
-    }
-
+    Uint32 lastTicks = SDL_GetTicks();
     bool running = true;
-    SDL_Event e;
-
-    auto last_time = std::chrono::high_resolution_clock::now();
-    float angle = 0.0f;     // rotation angle around Z
-    float forward = 0.0f;   // optional forward motion
-
     while (running) {
-        // time
-        auto now = std::chrono::high_resolution_clock::now();
-        std::chrono::duration<float> delta = now - last_time;
-        last_time = now;
-        float dt = delta.count();
-        if (dt <= 0.0f) dt = 1.0f/60.0f;
-
-        // events
+        SDL_Event e;
         while (SDL_PollEvent(&e)) {
             if (e.type == SDL_QUIT) running = false;
-            else if (e.type == SDL_KEYDOWN) {
-                if (e.key.keysym.sym == SDLK_ESCAPE) running = false;
-                else if (e.key.keysym.sym == SDLK_UP) forward += 50.0f;
-                else if (e.key.keysym.sym == SDLK_DOWN) forward -= 50.0f;
-                else if (e.key.keysym.sym == SDLK_SPACE) forward = 0.0f;
-            }
         }
 
-        // update rotation
-        angle += ROT_SPEED * dt;
+        Uint32 currentTicks = SDL_GetTicks();
+        float dt = (currentTicks - lastTicks) / 1000.0f;
+        lastTicks = currentTicks;
 
-        // clear (black)
-        SDL_SetRenderDrawColor(ren, 0, 0, 0, 255);
-        SDL_RenderClear(ren);
+        SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+        SDL_RenderClear(renderer);
 
-        // center
-        float cx = WIDTH * 0.5f;
-        float cy = HEIGHT * 0.5f;
-
-        // precompute sin/cos
-        float ca = std::cos(angle);
-        float sa = std::sin(angle);
+        // Update and draw stars
+        float angle = ROTATION_SPEED * dt;
+        float cosA = std::cos(angle);
+        float sinA = std::sin(angle);
+        float scale = (WIDTH / 2.0f) / std::tan(FOV * 0.5f * M_PI / 180.0f);
 
         for (auto &s : stars) {
-            // rotate star around Z axis (X,Y rotate)
-            float rx = s.x * ca - s.y * sa;
-            float ry = s.x * sa + s.y * ca;
-            float rz = s.z;
-
-            // optional forward motion (move stars closer)
-            rz -= forward * dt;
-            if (rz < 0.5f) {
-                // recycle star to far plane with new random x,y
-                s.x = distX(rng) * 0.5f;
-                s.y = distY(rng) * 0.5f;
-                s.z = distZ(rng);
-                continue;
-            }
-            s.z = rz; // write back depth change
-
-            // perspective projection: screen_x = (x / z) * scale + cx
-            float proj = FOV / rz;
-            float sx = rx * proj + cx;
-            float sy = ry * proj + cy;
-
-            // if outside screen, you can wrap or skip drawing
-            if (sx < -50 || sx > WIDTH + 50 || sy < -50 || sy > HEIGHT + 50) {
-                // optionally recycle far-away / out-of-view stars
-                // we'll sometimes just draw them when in view
+            // Move forward
+            s.z -= FORWARD_SPEED * dt;
+            if (s.z <= NEAR_Z) {
+                s.x = (std::rand() / (float)RAND_MAX - 0.5f) * 2.0f * WIDTH;
+                s.y = (std::rand() / (float)RAND_MAX - 0.5f) * 2.0f * HEIGHT;
+                s.z = FAR_Z;
             }
 
-            // compute brightness/size based on depth (closer => brighter, larger)
-            float depthNorm = clamp((4.0f * FOV - rz) / (4.0f * FOV), 0.0f, 1.0f);
-            int size = 1 + int(depthNorm * 3.5f); // 1..4 pixels
-            Uint8 bright = (Uint8)(80 + depthNorm * 175); // 80..255
+            // Rotate around Z
+            float newX = s.x * cosA - s.y * sinA;
+            float newY = s.x * sinA + s.y * cosA;
+            s.x = newX;
+            s.y = newY;
 
-            // draw star as small rect (faster than circle)
-            SDL_Rect rrect;
-            rrect.w = size;
-            rrect.h = size;
-            rrect.x = int(sx - size/2);
-            rrect.y = int(sy - size/2);
+            // Project to screen
+            float px = (s.x / s.z) * scale + WIDTH / 2.0f;
+            float py = (s.y / s.z) * scale + HEIGHT / 2.0f;
 
-            SDL_SetRenderDrawColor(ren, bright, bright, bright, 255);
-            SDL_RenderFillRect(ren, &rrect);
+            // Brightness based on depth
+            float brightness = 1.0f / (s.z * 0.05f);
+            if (brightness > 1.0f) brightness = 1.0f;
+            Uint8 color = static_cast<Uint8>(brightness * 255);
+
+            // Size of star depends on depth
+            int size = static_cast<int>(3.0f / s.z * 50); 
+            if (size < 1) size = 1;
+            if (size > 4) size = 4;
+
+            if (px >= 0 && px < WIDTH && py >= 0 && py < HEIGHT) {
+                SDL_SetRenderDrawColor(renderer, color, color, color, 255);
+                SDL_Rect rect = { (int)px, (int)py, size, size };
+                SDL_RenderFillRect(renderer, &rect);
+            }
+
         }
 
-        // optional HUD text (no SDL_ttf here) - draw a small indicator using renderer
-        // draw a faint center cross to see rotation center
-        SDL_SetRenderDrawColor(ren, 40, 40, 40, 255);
-        SDL_RenderDrawLine(ren, cx-8, cy, cx+8, cy);
-        SDL_RenderDrawLine(ren, cx, cy-8, cx, cy+8);
-
-        SDL_RenderPresent(ren);
+        SDL_RenderPresent(renderer);
     }
 
-    SDL_DestroyRenderer(ren);
-    SDL_DestroyWindow(win);
+    SDL_DestroyRenderer(renderer);
+    SDL_DestroyWindow(window);
     SDL_Quit();
     return 0;
 }
