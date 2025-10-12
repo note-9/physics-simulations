@@ -2,6 +2,7 @@
 #include <cstdlib>
 #include <ctime>
 #include <vector>
+#include <cmath>
 
 struct Ball {
     float x, y;
@@ -12,7 +13,7 @@ struct Ball {
 
 int main() {
     SDL_Init(SDL_INIT_VIDEO);
-    SDL_Window* window = SDL_CreateWindow("Simple Bouncing Balls",
+    SDL_Window* window = SDL_CreateWindow("Bouncing Balls with Collisions",
         SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
         800, 600, 0);
     SDL_Renderer* renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
@@ -25,15 +26,15 @@ int main() {
         Ball b;
         b.x = rand() % 800;
         b.y = rand() % 600;
-        b.vx = (rand() % 200 - 100) / 100.0f; // random speed
-        b.vy = (rand() % 200 - 100) / 100.0f;
-        b.radius = 10 + rand() % 10;
+        b.vx = (rand() % 200 - 100) / 50.0f;
+        b.vy = (rand() % 200 - 100) / 50.0f;
+        b.radius = 10 + rand() % 15;
         b.color = { (Uint8)(rand() % 255), (Uint8)(rand() % 255), (Uint8)(rand() % 255), 255 };
         balls.push_back(b);
     }
 
     bool running = true;
-    float gravity = 0.5f;
+    float gravity = 0.4f;
 
     while (running) {
         SDL_Event e;
@@ -42,22 +43,58 @@ int main() {
                 running = false;
         }
 
-        // Physics update
+        // ---- Physics update ----
         for (auto& b : balls) {
-            b.vy += gravity;  // gravity
+            b.vy += gravity;
             b.x += b.vx;
             b.y += b.vy;
 
             // Bounce off walls
-            if (b.x - b.radius < 0 || b.x + b.radius > 800)
-                b.vx *= -1;
+            if (b.x - b.radius < 0) { b.x = b.radius; b.vx *= -1; }
+            if (b.x + b.radius > 800) { b.x = 800 - b.radius; b.vx *= -1; }
             if (b.y + b.radius > 600) {
                 b.y = 600 - b.radius;
-                b.vy *= -0.8f; // lose some speed when bouncing
+                b.vy *= -0.8f;
+            }
+            if (b.y - b.radius < 0) { b.y = b.radius; b.vy *= -1; }
+        }
+
+        // ---- Ball-to-ball collision ----
+        for (size_t i = 0; i < balls.size(); ++i) {
+            for (size_t j = i + 1; j < balls.size(); ++j) {
+                Ball& A = balls[i];
+                Ball& B = balls[j];
+
+                float dx = B.x - A.x;
+                float dy = B.y - A.y;
+                float dist = std::sqrt(dx * dx + dy * dy);
+                float minDist = A.radius + B.radius;
+
+                if (dist < minDist && dist > 0) {
+                    // Push them apart
+                    float overlap = 0.5f * (minDist - dist);
+                    A.x -= overlap * (dx / dist);
+                    A.y -= overlap * (dy / dist);
+                    B.x += overlap * (dx / dist);
+                    B.y += overlap * (dy / dist);
+
+                    // Swap their velocity directions (approx elastic collision)
+                    float nx = dx / dist;
+                    float ny = dy / dist;
+
+                    float kx = A.vx - B.vx;
+                    float ky = A.vy - B.vy;
+                    float p = 2 * (nx * kx + ny * ky) / 2; // equal mass
+
+                    A.vx -= p * nx;
+                    A.vy -= p * ny;
+                    B.vx += p * nx;
+                    B.vy += p * ny;
+                }
             }
         }
 
-        // Draw
+        // ---- Rendering ----
         SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
         SDL_RenderClear(renderer);
 
@@ -72,7 +109,7 @@ int main() {
         }
 
         SDL_RenderPresent(renderer);
-        SDL_Delay(16); // ~60 FPS
+        SDL_Delay(16);
     }
 
     SDL_DestroyRenderer(renderer);
