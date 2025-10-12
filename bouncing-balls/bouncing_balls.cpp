@@ -9,11 +9,13 @@ struct Ball {
     float vx, vy;
     int radius;
     SDL_Color color;
+    std::vector<std::pair<float, float>> trail; // store previous positions
+    static const int TRAIL_LENGTH = 20;         // max trail length
 };
 
 int main() {
     SDL_Init(SDL_INIT_VIDEO);
-    SDL_Window* window = SDL_CreateWindow("Bouncing Balls with Collisions",
+    SDL_Window* window = SDL_CreateWindow("Bouncing Balls with Drag and Trails",
         SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
         800, 600, 0);
     SDL_Renderer* renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
@@ -35,6 +37,7 @@ int main() {
 
     bool running = true;
     float gravity = 0.4f;
+    float drag = 0.99f; // lower = more air resistance
 
     while (running) {
         SDL_Event e;
@@ -45,9 +48,21 @@ int main() {
 
         // ---- Physics update ----
         for (auto& b : balls) {
+            // Apply gravity
             b.vy += gravity;
+
+            // Apply drag
+            b.vx *= drag;
+            b.vy *= drag;
+
+            // Update position
             b.x += b.vx;
             b.y += b.vy;
+
+            // Update trail
+            b.trail.push_back({b.x, b.y});
+            if (b.trail.size() > Ball::TRAIL_LENGTH)
+                b.trail.erase(b.trail.begin());
 
             // Bounce off walls
             if (b.x - b.radius < 0) { b.x = b.radius; b.vx *= -1; }
@@ -71,14 +86,14 @@ int main() {
                 float minDist = A.radius + B.radius;
 
                 if (dist < minDist && dist > 0) {
-                    // Push them apart
+                    // Push apart
                     float overlap = 0.5f * (minDist - dist);
                     A.x -= overlap * (dx / dist);
                     A.y -= overlap * (dy / dist);
                     B.x += overlap * (dx / dist);
                     B.y += overlap * (dy / dist);
 
-                    // Swap their velocity directions (approx elastic collision)
+                    // Basic velocity swap (equal mass)
                     float nx = dx / dist;
                     float ny = dy / dist;
 
@@ -99,6 +114,27 @@ int main() {
         SDL_RenderClear(renderer);
 
         for (auto& b : balls) {
+            // Draw trail
+            for (size_t i = 0; i < b.trail.size(); ++i) {
+                float alpha = 0.2f + 0.8f * ((float)i / b.trail.size()); // fade effect
+                SDL_SetRenderDrawColor(renderer,
+                    (Uint8)(b.color.r * alpha),
+                    (Uint8)(b.color.g * alpha),
+                    (Uint8)(b.color.b * alpha),
+                    255);
+
+                int tx = (int)b.trail[i].first;
+                int ty = (int)b.trail[i].second;
+
+                for (int w = -b.radius/2; w <= b.radius/2; w++) {
+                    for (int h = -b.radius/2; h <= b.radius/2; h++) {
+                        if (w * w + h * h <= (b.radius/2) * (b.radius/2))
+                            SDL_RenderDrawPoint(renderer, tx + w, ty + h);
+                    }
+                }
+            }
+
+            // Draw main ball
             SDL_SetRenderDrawColor(renderer, b.color.r, b.color.g, b.color.b, 255);
             for (int w = -b.radius; w <= b.radius; w++) {
                 for (int h = -b.radius; h <= b.radius; h++) {
